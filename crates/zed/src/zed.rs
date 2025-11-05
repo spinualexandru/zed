@@ -590,8 +590,8 @@ fn initialize_panels(
             workspace_handle.clone(),
             cx.clone(),
         );
-        let debug_panel = DebugPanel::load(workspace_handle.clone(), cx.clone());
-        let browser_panel = BrowserPanel::load(workspace_handle.clone(), cx);
+        let browser_panel = BrowserPanel::load(workspace_handle.clone(), cx.clone());
+        let debug_panel = DebugPanel::load(workspace_handle.clone(), cx);
 
         let (
             project_panel,
