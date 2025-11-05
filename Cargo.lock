@@ -2383,6 +2383,24 @@ dependencies = [
 ]
 
 [[package]]
+name = "browser_panel"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "db",
+ "futures 0.3.31",
+ "gpui",
+ "log",
+ "serde",
+ "serde_json",
+ "settings",
+ "ui",
+ "util",
+ "workspace",
+ "zed_actions",
+]
+
+[[package]]
 name = "bstr"
 version = "1.12.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -21151,6 +21169,7 @@ dependencies = [
  "backtrace",
  "bincode 1.3.3",
  "breadcrumbs",
+ "browser_panel",
  "call",
  "channel",
  "clap",

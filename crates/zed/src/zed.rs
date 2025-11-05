@@ -15,6 +15,7 @@ pub use app_menus::*;
 use assets::Assets;
 use audio::{AudioSettings, REPLAY_DURATION};
 use breadcrumbs::Breadcrumbs;
+use browser_panel::BrowserPanel;
 use client::zed_urls;
 use collections::VecDeque;
 use debugger_ui::debugger_panel::DebugPanel;
@@ -589,7 +590,8 @@ fn initialize_panels(
             workspace_handle.clone(),
             cx.clone(),
         );
-        let debug_panel = DebugPanel::load(workspace_handle.clone(), cx);
+        let debug_panel = DebugPanel::load(workspace_handle.clone(), cx.clone());
+        let browser_panel = BrowserPanel::load(workspace_handle.clone(), cx);
 
         let (
             project_panel,
@@ -599,6 +601,7 @@ fn initialize_panels(
             channels_panel,
             notification_panel,
             debug_panel,
+            browser_panel,
         ) = futures::try_join!(
             project_panel,
             outline_panel,
@@ -607,6 +610,7 @@ fn initialize_panels(
             channels_panel,
             notification_panel,
             debug_panel,
+            browser_panel,
         )?;
 
         workspace_handle.update_in(cx, |workspace, window, cx| {
@@ -617,6 +621,7 @@ fn initialize_panels(
             workspace.add_panel(channels_panel, window, cx);
             workspace.add_panel(notification_panel, window, cx);
             workspace.add_panel(debug_panel, window, cx);
+            workspace.add_panel(browser_panel, window, cx);
         })?;
 
         fn setup_or_teardown_agent_panel(

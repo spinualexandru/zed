@@ -1,0 +1,27 @@
+[package]
+name = "browser_panel"
+version = "0.1.0"
+edition.workspace = true
+publish.workspace = true
+license = "Apache-2.0"
+
+[lints]
+workspace = true
+
+[lib]
+path = "src/browser_panel.rs"
+doctest = false
+
+[dependencies]
+anyhow.workspace = true
+db.workspace = true
+futures.workspace = true
+gpui.workspace = true
+log.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+settings.workspace = true
+ui.workspace = true
+util.workspace = true
+workspace.workspace = true
+zed_actions.workspace = true
