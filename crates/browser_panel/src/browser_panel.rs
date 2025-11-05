@@ -6,6 +6,7 @@ use gpui::{
     EventEmitter, FocusHandle, Focusable, InteractiveElement, IntoElement, ParentElement, Pixels,
     Render, Styled, WeakEntity, Window, AnyElement,
 };
+use menu;
 use parking_lot::Mutex;
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
@@ -219,6 +220,18 @@ impl BrowserPanel {
     pub fn new(workspace: &Workspace, window: &mut Window, cx: &mut Context<Self>) -> Self {
         let address_bar = cx.new(|cx| InputField::new(window, cx, "Enter URL or search..."));
 
+        // Register handler for Enter key in address bar
+        let panel_handle = cx.entity().downgrade();
+        address_bar.update(cx, |input, cx| {
+            input.editor.update(cx, |editor, _cx| {
+                let _ = editor.register_action(move |_: &menu::Confirm, window, cx| {
+                    if let Some(panel) = panel_handle.upgrade() {
+                        window.dispatch_action(Navigate.boxed_clone(), cx);
+                    }
+                });
+            });
+        });
+
         let mut panel = Self {
             workspace: workspace.weak_handle(),
             focus_handle: cx.focus_handle(),
@@ -231,21 +244,17 @@ impl BrowserPanel {
             history: VecDeque::new(),
             history_index: None,
             webview: Arc::new(Mutex::new(BrowserWebView::new())),
-            webview_enabled: false, // Disabled by default until platform integration is complete
+            webview_enabled: false, // Disabled by default - GPUI doesn't support native view embedding yet
         };
-
-        // Set initial URL in address bar
-        // Note: We don't set the text here as we're in a context without direct window access
-        // The address bar will be updated when navigate_to_url is called
 
         // Initialize with default page
         panel.add_to_history(DEFAULT_URL.to_string(), Some("Zed - Code at the speed of thought".to_string()));
 
-        // Try to initialize WebView
-        // Note: This may fail if platform integration is not complete
-        if let Err(e) = panel.try_initialize_webview(window) {
-            log::warn!("Could not initialize WebView: {}. Using placeholder rendering.", e);
-        }
+        // Note: WebView initialization is disabled because GPUI doesn't support embedding
+        // native platform views yet. When that's available, uncomment below:
+        // if let Err(e) = panel.try_initialize_webview(window) {
+        //     log::warn!("Could not initialize WebView: {}. Using placeholder rendering.", e);
+        // }
 
         panel
     }
@@ -473,8 +482,21 @@ impl BrowserPanel {
 
     fn navigate(&mut self, _action: &Navigate, window: &mut Window, cx: &mut Context<Self>) {
         let url = self.address_bar.read(cx).editor.read(cx).text(cx);
-        self.add_to_history(url.clone(), None);
-        self.navigate_to_url(url, window, cx);
+
+        // Normalize URL before adding to history
+        let normalized_url = if url.starts_with("http://") || url.starts_with("https://") {
+            url.clone()
+        } else if url.contains('.') && !url.contains(' ') {
+            format!("https://{}", url)
+        } else {
+            format!("https://www.google.com/search?q={}", urlencoding::encode(&url))
+        };
+
+        // Update address bar with normalized URL
+        self.update_address_bar_text(&normalized_url, window, cx);
+
+        self.add_to_history(normalized_url.clone(), None);
+        self.navigate_to_url(normalized_url, window, cx);
         self.serialize(cx);
     }
 
@@ -540,22 +562,19 @@ impl BrowserPanel {
     }
 
     fn render_content(&self, cx: &mut Context<Self>) -> AnyElement {
-        if self.webview_enabled {
-            self.render_webview_placeholder(cx).into_any_element()
-        } else {
-            match &self.load_state {
-                BrowserLoadState::Idle => {
-                    self.render_placeholder("Ready to browse", cx).into_any_element()
-                }
-                BrowserLoadState::Loading => {
-                    self.render_placeholder("Loading...", cx).into_any_element()
-                }
-                BrowserLoadState::Loaded => {
-                    self.render_web_view(cx).into_any_element()
-                }
-                BrowserLoadState::Error(error) => {
-                    self.render_error(error, cx).into_any_element()
-                }
+        match &self.load_state {
+            BrowserLoadState::Idle => {
+                self.render_placeholder("Ready to browse", cx).into_any_element()
+            }
+            BrowserLoadState::Loading => {
+                self.render_placeholder("Loading...", cx).into_any_element()
+            }
+            BrowserLoadState::Loaded => {
+                // WebView not available yet in GPUI, show informative placeholder
+                self.render_loaded_placeholder(cx).into_any_element()
+            }
+            BrowserLoadState::Error(error) => {
+                self.render_error(error, cx).into_any_element()
             }
         }
     }
@@ -588,9 +607,9 @@ impl BrowserPanel {
             )
     }
 
-    fn render_webview_placeholder(&self, cx: &mut Context<Self>) -> impl IntoElement {
-        // This is where the WebView would be rendered
-        // In a full implementation, this would embed the native WebView widget
+    fn render_loaded_placeholder(&self, cx: &mut Context<Self>) -> impl IntoElement {
+        // GPUI doesn't yet support embedding native WebView widgets
+        // This placeholder shows what would be displayed
         div()
             .flex()
             .flex_col()
@@ -605,9 +624,9 @@ impl BrowserPanel {
                     .gap_4()
                     .items_center()
                     .p_8()
-                    .child(Icon::new(IconName::Link).size(IconSize::XLarge).color(Color::Info))
+                    .child(Icon::new(IconName::Link).size(IconSize::XLarge).color(Color::Success))
                     .child(
-                        Label::new("WebView Active")
+                        Label::new("Page Loaded")
                             .size(LabelSize::Large)
                             .color(Color::Default),
                     )
@@ -618,9 +637,9 @@ impl BrowserPanel {
                             .gap_2()
                             .items_start()
                             .child(
-                                Label::new(format!("Current URL: {}", self.current_url))
-                                    .size(LabelSize::Small)
-                                    .color(Color::Muted),
+                                Label::new(format!("URL: {}", self.current_url))
+                                    .size(LabelSize::Default)
+                                    .color(Color::Default),
                             )
                             .when_some(self.page_title.as_ref(), |this, title| {
                                 this.child(
@@ -630,9 +649,21 @@ impl BrowserPanel {
                                 )
                             })
                             .child(
-                                Label::new("WebView is rendering in a native platform widget")
-                                    .size(LabelSize::Small)
-                                    .color(Color::Success),
+                                div()
+                                    .flex()
+                                    .flex_col()
+                                    .gap_1()
+                                    .mt_4()
+                                    .child(
+                                        Label::new("Native WebView rendering not yet available")
+                                            .size(LabelSize::Small)
+                                            .color(Color::Muted),
+                                    )
+                                    .child(
+                                        Label::new("GPUI needs native view embedding support")
+                                            .size(LabelSize::Small)
+                                            .color(Color::Disabled),
+                                    ),
                             ),
                     ),
             )

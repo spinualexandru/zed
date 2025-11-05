@@ -2425,6 +2425,7 @@ dependencies = [
  "futures 0.3.31",
  "gpui",
  "log",
+ "menu",
  "parking_lot",
  "raw-window-handle",
  "serde",

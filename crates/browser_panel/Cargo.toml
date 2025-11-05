@@ -20,6 +20,7 @@ editor.workspace = true
 futures.workspace = true
 gpui.workspace = true
 log.workspace = true
+menu.workspace = true
 parking_lot.workspace = true
 raw-window-handle = "0.6"
 serde.workspace = true
