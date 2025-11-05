@@ -19,6 +19,13 @@ use workspace::{
     Workspace,
 };
 
+// Conditionally compile Servo renderer when feature is enabled
+#[cfg(feature = "servo-browser")]
+mod servo_renderer;
+
+#[cfg(feature = "servo-browser")]
+use servo_renderer::{RenderSize, ServoRenderer};
+
 const BROWSER_PANEL_KEY: &str = "BrowserPanel";
 const DEFAULT_URL: &str = "https://zed.dev";
 const MAX_HISTORY: usize = 100;

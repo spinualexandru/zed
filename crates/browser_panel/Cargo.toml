@@ -12,6 +12,12 @@ workspace = true
 path = "src/browser_panel.rs"
 doctest = false
 
+[features]
+default = []
+# Enable full Servo browser engine (requires ~30min build time and system dependencies)
+# See README.md for setup instructions
+servo-browser = ["dep:libservo", "dep:glutin"]
+
 [dependencies]
 anyhow.workspace = true
 collections.workspace = true
@@ -33,5 +39,10 @@ url = "2.5"
 urlencoding = "2.1"
 util.workspace = true
 workspace.workspace = true
-wry = "0.46"
 zed_actions.workspace = true
+
+# Optional dependencies for Servo browser engine
+# Note: Servo is not on crates.io, so we use a git dependency
+# Update the 'rev' to match the latest Servo commit hash
+libservo = { git = "https://github.com/servo/servo", rev = "3f69ef2303dd2", optional = true, package = "servo" }
+glutin = { version = "0.31", optional = true }
