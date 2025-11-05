@@ -218,9 +218,13 @@ pub struct BrowserPanel {
     history: VecDeque<BrowserHistoryEntry>,
     history_index: Option<usize>,
 
-    // WebView integration
+    // Legacy WebView integration (wry - not used)
     webview: Arc<Mutex<BrowserWebView>>,
     webview_enabled: bool,
+
+    // Servo renderer (only when feature enabled)
+    #[cfg(feature = "servo-browser")]
+    servo_renderer: Option<Arc<Mutex<ServoRenderer>>>,
 }
 
 impl BrowserPanel {
@@ -252,16 +256,38 @@ impl BrowserPanel {
             history_index: None,
             webview: Arc::new(Mutex::new(BrowserWebView::new())),
             webview_enabled: false, // Disabled by default - GPUI doesn't support native view embedding yet
+            #[cfg(feature = "servo-browser")]
+            servo_renderer: None,
         };
 
         // Initialize with default page
         panel.add_to_history(DEFAULT_URL.to_string(), Some("Zed - Code at the speed of thought".to_string()));
 
-        // Note: WebView initialization is disabled because GPUI doesn't support embedding
-        // native platform views yet. When that's available, uncomment below:
-        // if let Err(e) = panel.try_initialize_webview(window) {
-        //     log::warn!("Could not initialize WebView: {}. Using placeholder rendering.", e);
-        // }
+        // Initialize Servo renderer if feature is enabled
+        #[cfg(feature = "servo-browser")]
+        {
+            log::info!("servo-browser feature enabled, initializing Servo renderer");
+            match ServoRenderer::new() {
+                Ok(mut renderer) => {
+                    let size = RenderSize {
+                        width: 800,
+                        height: 600,
+                    };
+                    match renderer.initialize(size) {
+                        Ok(()) => {
+                            panel.servo_renderer = Some(Arc::new(Mutex::new(renderer)));
+                            log::info!("Servo renderer initialized successfully");
+                        }
+                        Err(e) => {
+                            log::error!("Failed to initialize Servo renderer: {}", e);
+                        }
+                    }
+                }
+                Err(e) => {
+                    log::error!("Failed to create Servo renderer: {}", e);
+                }
+            }
+        }
 
         panel
     }

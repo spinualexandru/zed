@@ -50,6 +50,45 @@ impl EventLoopWaker for NoOpEventLoopWaker {
     }
 }
 
+/// Embedder delegate for handling Servo callbacks
+/// This receives notifications from Servo about page events
+struct ServoEmbedder {
+    // Store page state, notifications, etc.
+}
+
+impl ServoEmbedder {
+    fn new() -> Self {
+        Self {}
+    }
+}
+
+// TODO: Uncomment and implement when compiling with Servo
+// The ServoDelegate trait is defined by Servo and handles embedder callbacks
+/*
+impl libservo::servo_delegate::ServoDelegate for ServoEmbedder {
+    fn notify_error(&self, msg: String) {
+        error!("Servo error: {}", msg);
+    }
+
+    fn notify_devtools_server_started(&self, _port: u16) {
+        debug!("DevTools server started");
+    }
+
+    fn notify_animating_changed(&self, _animating: bool) {
+        // Handle animation state changes
+    }
+
+    fn load_web_resource(&self, _url: String) -> Option<Vec<u8>> {
+        // Load web resources (fonts, etc)
+        None
+    }
+
+    fn show_notification(&self, _title: String, _body: String) {
+        // Show browser notifications in GPUI
+    }
+}
+*/
+
 /// Window implementation for Servo offscreen rendering
 pub struct ServoWindow {
     gl: Rc<dyn gl::Gl>,
@@ -105,6 +144,9 @@ pub struct ServoRenderer {
     gl: Option<Rc<dyn gl::Gl>>,
     size: RenderSize,
     current_url: Option<String>,
+    // Framebuffer for offscreen rendering
+    framebuffer_id: Option<u32>,
+    texture_id: Option<u32>,
 }
 
 impl ServoRenderer {
@@ -118,6 +160,8 @@ impl ServoRenderer {
             gl: None,
             size: RenderSize::default(),
             current_url: None,
+            framebuffer_id: None,
+            texture_id: None,
         })
     }
 
@@ -144,15 +188,82 @@ impl ServoRenderer {
         self.gl_surface = Some(surface);
         self.gl = Some(gl.clone());
 
+        // Create framebuffer and texture for offscreen rendering
+        self.create_framebuffer(size)?;
+
         // Initialize Servo
-        self.initialize_servo(gl, size)?;
+        self.initialize_servo(gl.clone(), size)?;
+
+        Ok(())
+    }
+
+    /// Create OpenGL framebuffer and texture for offscreen rendering
+    fn create_framebuffer(&mut self, size: RenderSize) -> Result<()> {
+        let gl = self.gl.as_ref().ok_or_else(|| anyhow!("GL not initialized"))?;
+
+        unsafe {
+            // Generate texture
+            let mut texture_id: u32 = 0;
+            gl.gen_textures(1, &mut texture_id);
+            gl.bind_texture(gl::TEXTURE_2D, texture_id);
+
+            // Set texture parameters
+            gl.tex_parameter_i(gl::TEXTURE_2D, gl::TEXTURE_MIN_FILTER, gl::LINEAR as i32);
+            gl.tex_parameter_i(gl::TEXTURE_2D, gl::TEXTURE_MAG_FILTER, gl::LINEAR as i32);
+            gl.tex_parameter_i(gl::TEXTURE_2D, gl::TEXTURE_WRAP_S, gl::CLAMP_TO_EDGE as i32);
+            gl.tex_parameter_i(gl::TEXTURE_2D, gl::TEXTURE_WRAP_T, gl::CLAMP_TO_EDGE as i32);
+
+            // Allocate texture storage
+            gl.tex_image_2d(
+                gl::TEXTURE_2D,
+                0,
+                gl::RGBA as i32,
+                size.width as i32,
+                size.height as i32,
+                0,
+                gl::RGBA,
+                gl::UNSIGNED_BYTE,
+                None,
+            );
+
+            // Generate framebuffer
+            let mut framebuffer_id: u32 = 0;
+            gl.gen_framebuffers(1, &mut framebuffer_id);
+            gl.bind_framebuffer(gl::FRAMEBUFFER, framebuffer_id);
+
+            // Attach texture to framebuffer
+            gl.framebuffer_texture_2d(
+                gl::FRAMEBUFFER,
+                gl::COLOR_ATTACHMENT0,
+                gl::TEXTURE_2D,
+                texture_id,
+                0,
+            );
+
+            // Check framebuffer status
+            let status = gl.check_framebuffer_status(gl::FRAMEBUFFER);
+            if status != gl::FRAMEBUFFER_COMPLETE {
+                return Err(anyhow!("Framebuffer not complete: {}", status));
+            }
+
+            // Unbind framebuffer
+            gl.bind_framebuffer(gl::FRAMEBUFFER, 0);
+            gl.bind_texture(gl::TEXTURE_2D, 0);
+
+            self.texture_id = Some(texture_id);
+            self.framebuffer_id = Some(framebuffer_id);
+
+            info!("Created framebuffer {} with texture {}", framebuffer_id, texture_id);
+        }
 
         Ok(())
     }
 
     /// Initialize Servo engine
     fn initialize_servo(&mut self, gl: Rc<dyn gl::Gl>, size: RenderSize) -> Result<()> {
-        // Set up Servo options
+        info!("Initializing Servo engine");
+
+        // Set up Servo configuration
         let mut opts = opts::default_opts();
         opts::set_defaults(&mut opts);
 
@@ -160,29 +271,50 @@ impl ServoRenderer {
         opts.output_file = None;
         opts.headless = true;
 
+        // Set resources path (required for Servo)
+        // In production, this should point to the Servo resources directory
+        if let Ok(current_dir) = std::env::current_dir() {
+            let resources_path = current_dir.join("resources").join("servo");
+            if resources_path.exists() {
+                libservo::servo_config::resource_files::set_resources_path(
+                    Some(resources_path.to_string_lossy().to_string())
+                );
+            } else {
+                warn!("Servo resources directory not found at {:?}", resources_path);
+            }
+        }
+
         // Create window for Servo
         let window = Rc::new(ServoWindow::new(gl, size));
 
         // Create event loop waker
         let waker = Box::new(NoOpEventLoopWaker);
 
-        // Create embedder methods (not yet implemented)
-        // let embedder = Box::new(ServoEmbedder::new());
+        // Create embedder delegate
+        let delegate = Box::new(ServoEmbedder::new());
 
         // Initialize Servo
-        // Note: This is a simplified initialization
-        // A full implementation would need proper embedder methods
-        info!("Servo initialization would happen here");
+        // Note: Servo::new API may have changed - adjust as needed when compiling
+        info!("Creating Servo instance");
 
-        // TODO: Uncomment when Servo compiles
-        // let servo = Servo::new(
-        //     embedder,
-        //     window.clone(),
-        //     None, // user agent
-        //     CompositeTarget::Window,
-        // );
+        // TODO: Uncomment and adjust API when compiling with Servo
+        /*
+        let servo = Servo::new(
+            delegate,
+            window.clone(),
+            waker,
+            None, // user agent
+        );
 
-        // self.servo = Some(servo);
+        self.servo = Some(servo);
+
+        // Load initial blank page
+        let blank_url = ServoUrl::parse("about:blank")
+            .expect("Failed to parse blank URL");
+        servo.handle_events(vec![WindowEvent::NewBrowser(blank_url, BrowserId::new())]);
+        */
+
+        info!("Servo initialized (API calls commented out until compilation)");
 
         Ok(())
     }
@@ -218,14 +350,23 @@ impl ServoRenderer {
     }
 
     /// Get the current OpenGL texture ID
-    /// This texture contains the rendered web page
+    /// This texture contains the rendered web page and can be displayed in GPUI
     pub fn get_texture_id(&self) -> Option<u32> {
-        // TODO: Return the actual texture ID from Servo's framebuffer
-        None
+        self.texture_id
+    }
+
+    /// Get the framebuffer ID
+    pub fn get_framebuffer_id(&self) -> Option<u32> {
+        self.framebuffer_id
     }
 
     /// Resize the rendering surface
     pub fn resize(&mut self, width: u32, height: u32) -> Result<()> {
+        if width == self.size.width && height == self.size.height {
+            return Ok(());
+        }
+
+        info!("Resizing renderer from {:?} to {}x{}", self.size, width, height);
         self.size = RenderSize { width, height };
 
         if let Some(surface) = &self.gl_surface {
@@ -239,6 +380,10 @@ impl ServoRenderer {
             }
         }
 
+        // Recreate framebuffer with new size
+        self.delete_framebuffer();
+        self.create_framebuffer(self.size)?;
+
         // Notify Servo of size change
         if let Some(servo) = &mut self.servo {
             // TODO: Send resize event to Servo
@@ -246,6 +391,20 @@ impl ServoRenderer {
         }
 
         Ok(())
+    }
+
+    /// Delete the current framebuffer and texture
+    fn delete_framebuffer(&mut self) {
+        if let Some(gl) = &self.gl {
+            unsafe {
+                if let Some(framebuffer_id) = self.framebuffer_id.take() {
+                    gl.delete_framebuffers(1, &framebuffer_id);
+                }
+                if let Some(texture_id) = self.texture_id.take() {
+                    gl.delete_textures(1, &texture_id);
+                }
+            }
+        }
     }
 
     /// Get current size
@@ -256,12 +415,17 @@ impl ServoRenderer {
 
 impl Drop for ServoRenderer {
     fn drop(&mut self) {
+        // Clean up framebuffer and texture
+        self.delete_framebuffer();
+
         // Clean up OpenGL resources
         if let Some(context) = self.gl_context.take() {
-            if let Some(surface) = self.gl_surface.take() {
+            if let Some(_surface) = self.gl_surface.take() {
                 let _ = context.make_not_current();
             }
         }
+
+        info!("ServoRenderer dropped");
     }
 }
 
